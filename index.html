@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Blaster with Profiles</title>
+    <style>
+        canvas { border: 1px solid white; background: black; display: none; }
+        body { display: flex; flex-direction: column; align-items: center; background: #222; color: white; font-family: Arial, sans-serif; }
+        #score, #question, #lives { font-size: 24px; margin: 10px; display: none; }
+        #profileScreen { text-align: center; }
+        #gameScreen { display: none; }
+        #gameOverScreen { display: none; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="profileScreen">
+        <h1>Create Your Math Blaster Profile</h1>
+        <input type="text" id="usernameInput" placeholder="Enter your username">
+        <button id="startButton">Start Game</button>
+    </div>
+    <div id="gameScreen">
+        <div id="score">Score: 0</div>
+        <div id="lives">Lives: 3</div>
+        <div id="question"></div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+    <div id="gameOverScreen">
+        <h1>Game Over</h1>
+        <p id="finalScore"></p>
+        <button id="restartButton">Play Again</button>
+    </div>
+
+    <script>
+        console.log('Script starting...');
+
+        let player, enemies, bullets, particles, currentQuestion, score, lives, username, rightPressed, leftPressed, gameActive;
+        let profileScreen, gameScreen, gameOverScreen, usernameInput, canvas, ctx, scoreDisplay, livesDisplay, questionDisplay, finalScoreDisplay, startButton, restartButton;
+        let audioContext;
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playSound(frequency, duration, type = 'sine') {
+            if (!audioContext) initAudio();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            oscillator.type = type;
+            oscillator.frequency.value = frequency;
+            gainNode.gain.value = 0.1;
+            oscillator.start();
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+
+        function drawPlayer(x, y) {
+            ctx.fillStyle = '#C0C0C0'; // Silver body
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y - 25); // Top point
+            ctx.lineTo(x + 40, y + 15); // Bottom right
+            ctx.lineTo(x + 30, y + 25); // Bottom right wingtip
+            ctx.lineTo(x + 20, y + 15); // Bottom center
+            ctx.lineTo(x + 10, y + 25); // Bottom left wingtip
+            ctx.lineTo(x, y + 15); // Bottom left
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#00CED1'; // Turquoise cockpit
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y - 15); // Cockpit top
+            ctx.lineTo(x + 30, y + 5); // Cockpit right
+            ctx.lineTo(x + 10, y + 5); // Cockpit left
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#FF4500'; // Orange engines
+            ctx.fillRect(x + 15, y + 25, 5, 5); // Left engine
+            ctx.fillRect(x + 25, y + 25, 5, 5); // Right engine
+        }
+
+        function drawEnemy(x, y, number) {
+            ctx.fillStyle = 'green';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 15, 15, 0, Math.PI * 2); // Saucer body
+            ctx.fill();
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 5, 5, 0, Math.PI * 2); // Dome
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(number, x + 10, y + 20);
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x: x + 15,
+                    y: y + 15,
+                    radius: Math.random() * 3 + 1,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 20
+                });
+            }
+        }
+
+        function drawParticles() {
+            particles.forEach((particle, index) => {
+                ctx.fillStyle = `rgba(255, 165, 0, ${particle.life / 20})`;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                ctx.fill();
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                if (particle.life <= 0) particles.splice(index, 1);
+            });
+        }
+
+        function startGame() {
+            console.log('Game starting...');
+            username = usernameInput.value.trim() || 'Player';
+            profileScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            gameActive = true;
+
+            generateQuestion();
+            setInterval(spawnEnemy, 2000);
+            spawnEnemyWithCorrectAnswer(); // Ensure a correct answer at start
+            update();
+        }
+
+        function restartGame() {
+            console.log('Restarting game...');
+            gameOverScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            gameActive = true;
+
+            generateQuestion();
+            spawnEnemyWithCorrectAnswer(); // Ensure a correct answer at restart
+            update();
+        }
+
+        function generateQuestion() {
+            const num1 = Math.floor(Math.random() * 10) + 1;
+            const num2 = Math.floor(Math.random() * 10) + 1;
+            const operation = Math.random() < 0.5 ? '+' : '-';
+            let answer;
+            if (operation === '+') {
+                answer = num1 + num2;
+            } else {
+                const larger = Math.max(num1, num2);
+                const smaller = Math.min(num1, num2);
+                answer = larger - smaller;
+                currentQuestion = { num1: larger, num2: smaller, operation: operation, answer: answer };
+            }
+            if (!currentQuestion || !currentQuestion.num1) {
+                currentQuestion = { num1: num1, num2: num2, operation: operation, answer: answer };
+            }
+            questionDisplay.textContent = `${username}, what is ${currentQuestion.num1} ${operation} ${currentQuestion.num2}?`;
+            console.log(`Question: ${currentQuestion.num1} ${operation} ${currentQuestion.num2} = ${currentQuestion.answer}`);
+        }
+
+        function spawnEnemyWithCorrectAnswer() {
+            enemies.push({
+                x: Math.random() * (canvas.width - 30),
+                y: 0,
+                width: 30,
+                height: 30,
+                speed: 1,
+                number: currentQuestion.answer,
+                isCorrect: true
+            });
+            console.log(`Enemy spawned (correct): ${currentQuestion.answer} (Correct: true)`);
+        }
+
+        function spawnEnemy() {
+            // Check if there's at least one correct-answer enemy on screen
+            const hasCorrectAnswer = enemies.some(enemy => enemy.isCorrect);
+            if (!hasCorrectAnswer) {
+                spawnEnemyWithCorrectAnswer();
+                return;
+            }
+
+            // Otherwise, spawn a random enemy (correct or incorrect)
+            const isCorrect = Math.random() < 0.5;
+            let displayNumber;
+            if (isCorrect) {
+                displayNumber = currentQuestion.answer;
+            } else {
+                do {
+                    displayNumber = Math.floor(Math.random() * 20) + 1;
+                } while (displayNumber === currentQuestion.answer);
+            }
+            enemies.push({
+                x: Math.random() * (canvas.width - 30),
+                y: 0,
+                width: 30,
+                height: 30,
+                speed: 1,
+                number: displayNumber,
+                isCorrect: displayNumber === currentQuestion.answer
+            });
+            console.log(`Enemy spawned: ${displayNumber} (Correct: ${enemies[enemies.length - 1].isCorrect})`);
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            console.log('Update tick');
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (rightPressed && player.x < canvas.width - player.width) player.x += 5;
+            if (leftPressed && player.x > 0) player.x -= 5;
+            drawPlayer(player.x, player.y);
+
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed;
+                drawEnemy(enemy.x, enemy.y, enemy.number);
+
+                if (enemy.x < player.x + player.width &&
+                    enemy.x + enemy.width > player.x &&
+                    enemy.y < player.y &&
+                    enemy.y + enemy.height > player.y - player.height) {
+                    enemies.splice(index, 1);
+                    lives -= 1;
+                    livesDisplay.textContent = `Lives: ${lives}`;
+                    console.log('Player hit by enemy, lives:', lives);
+                    playSound(200, 0.3, 'square');
+                    generateQuestion();
+                    spawnEnemyWithCorrectAnswer(); // Ensure a correct answer after collision
+                    if (lives <= 0) endGame();
+                    return;
+                }
+
+                if (enemy.y > canvas.height) {
+                    enemies.splice(index, 1);
+                    console.log('Enemy reached bottom, no life lost');
+                    // Ensure a correct answer remains or spawns
+                    if (!enemies.some(enemy => enemy.isCorrect)) {
+                        spawnEnemyWithCorrectAnswer();
+                    }
+                }
+            });
+
+            bullets.forEach((bullet, bIndex) => {
+                bullet.y -= bullet.speed;
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(bullet.x, bullet.y, 5, 15);
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+                        bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+                        console.log(`Bullet hit enemy: ${enemy.number}, isCorrect: ${enemy.isCorrect}, Current answer: ${currentQuestion.answer}`);
+                        if (enemy.isCorrect) {
+                            score += 1;
+                            scoreDisplay.textContent = `Score: ${score}`;
+                            console.log('Hit correct enemy! Score:', score);
+                            playSound(600, 0.1);
+                            createExplosion(enemy.x, enemy.y);
+                            generateQuestion();
+                            spawnEnemyWithCorrectAnswer(); // Ensure a correct answer for the new question
+                        } else {
+                            lives -= 1;
+                            livesDisplay.textContent = `Lives: ${lives}`;
+                            console.log('Hit incorrect enemy, lives:', lives);
+                            playSound(200, 0.3, 'square');
+                            if (lives <= 0) endGame();
+                        }
+                        enemies.splice(eIndex, 1);
+                        bullets.splice(bIndex, 1);
+                    }
+                });
+                if (bullet.y < 0) bullets.splice(bIndex, 1);
+            });
+
+            drawParticles();
+            requestAnimationFrame(update);
+        }
+
+        function endGame() {
+            gameActive = false;
+            gameScreen.style.display = 'none';
+            gameOverScreen.style.display = 'block';
+            finalScoreDisplay.textContent = `${username}, your final score: ${score}`;
+        }
+
+        window.onload = function() {
+            console.log('DOM loaded');
+
+            profileScreen = document.getElementById('profileScreen');
+            gameScreen = document.getElementById('gameScreen');
+            gameOverScreen = document.getElementById('gameOverScreen');
+            usernameInput = document.getElementById('usernameInput');
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            scoreDisplay = document.getElementById('score');
+            livesDisplay = document.getElementById('lives');
+            questionDisplay = document.getElementById('question');
+            finalScoreDisplay = document.getElementById('finalScore');
+            startButton = document.getElementById('startButton');
+            restartButton = document.getElementById('restartButton');
+
+            console.log('Canvas:', canvas ? 'Found' : 'Not found');
+
+            player = { x: 400, y: 550, width: 40, height: 50 };
+            enemies = [];
+            bullets = [];
+            particles = [];
+            currentQuestion = {};
+            score = 0;
+            lives = 3;
+            username = '';
+            rightPressed = false;
+            leftPressed = false;
+            gameActive = false;
+
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', restartGame);
+
+            document.addEventListener('keydown', (e) => {
+                if (!gameActive) return;
+                console.log(`Key pressed: ${e.key}`);
+                if (e.key === 'ArrowRight') rightPressed = true;
+                if (e.key === 'ArrowLeft') leftPressed = true;
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    bullets.push({ x: player.x + player.width / 2, y: player.y, speed: 5 });
+                    console.log('Bullet fired, count:', bullets.length);
+                    playSound(400, 0.1);
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowRight') rightPressed = false;
+                if (e.key === 'ArrowLeft') leftPressed = false;
+            });
+        };
+    </script>
+</body>
+</html>
