@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Blaster with Profiles</title>
+    <style>
+        canvas { border: 1px solid white; background: black; display: none; }
+        body { display: flex; flex-direction: column; align-items: center; background: #222; color: white; font-family: Arial, sans-serif; }
+        #score, #question, #lives { font-size: 24px; margin: 10px; display: none; }
+        #profileScreen { text-align: center; }
+        #gameScreen { display: none; }
+        #gameOverScreen { display: none; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="profileScreen">
+        <h1>Create Your Math Blaster Profile</h1>
+        <input type="text" id="usernameInput" placeholder="Enter your username">
+        <button id="startButton">Start Game</button>
+    </div>
+    <div id="gameScreen">
+        <div id="score">Score: 0</div>
+        <div id="lives">Lives: 3</div>
+        <div id="question"></div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+    </div>
+    <div id="gameOverScreen">
+        <h1>Game Over</h1>
+        <p id="finalScore"></p>
+        <button id="restartButton">Play Again</button>
+    </div>
+
+    <script>
+        console.log('Script starting...');
+
+        let player, enemies, bullets, particles, currentQuestion, score, lives, username, rightPressed, leftPressed, gameActive;
+        let profileScreen, gameScreen, gameOverScreen, usernameInput, canvas, ctx, scoreDisplay, livesDisplay, questionDisplay, finalScoreDisplay, startButton, restartButton;
+        let audioContext;
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playSound(frequency, duration, type = 'sine') {
+            if (!audioContext) initAudio();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            oscillator.type = type;
+            oscillator.frequency.value = frequency;
+            gainNode.gain.value = 0.1;
+            oscillator.start();
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+
+        function drawPlayer(x, y) {
+            ctx.fillStyle = 'gray';
+            ctx.beginPath();
+            ctx.moveTo(x, y + 20); // Bottom left
+            ctx.lineTo(x + 20, y - 20); // Top center
+            ctx.lineTo(x + 40, y + 20); // Bottom right
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(x + 15, y - 10, 10, 15); // Cockpit
+        }
+
+        function drawEnemy(x, y, number) {
+            ctx.fillStyle = 'green';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 15, 15, 0, Math.PI * 2); // Saucer body
+            ctx.fill();
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 5, 5, 0, Math.PI * 2); // Dome
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(number, x + 10, y + 20);
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x: x + 15,
+                    y: y + 15,
+                    radius: Math.random() * 3 + 1,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 20
+                });
+            }
+        }
+
+        function drawParticles() {
+            particles.forEach((particle, index) => {
+                ctx.fillStyle = `rgba(255, 165, 0, ${particle.life / 20})`; // Orange fade
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                ctx.fill();
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                if (particle.life <= 0) particles.splice(index, 1);
+            });
+        }
+
+        function startGame() {
+            console.log('Game starting...');
+            username = usernameInput.value.trim() || 'Player';
+            profileScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            gameActive = true;
+
+            generateQuestion();
+            setInterval(spawnEnemy, 2000);
+            update();
+        }
+
+        function restartGame() {
+            console.log('Restarting game...');
+            gameOverScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            gameActive = true;
+
+            generateQuestion();
+            update();
+        }
+
+        function generateQuestion() {
+            const num1 = Math.floor(Math.random() * 10) + 1;
+            const num2 = Math.floor(Math.random() * num1) + 1; // Ensure num2 <= num1 for subtraction
+            const operation = Math.random() < 0.5 ? '+' : '-';
+            currentQuestion = {
+                num1: num1,
+                num2: num2,
+                operation: operation,
+                answer: operation === '+' ? num1 + num2 : num1 - num2
+            };
+            questionDisplay.textContent = `${username}, what is ${num1} ${operation} ${num2}?`;
+            console.log(`Question: ${num1} ${operation} ${num2} = ${currentQuestion.answer}`);
+        }
+
+        function spawnEnemy() {
+            const isCorrect = Math.random() < 0.5;
+            const displayNumber = isCorrect ? currentQuestion.answer : Math.floor(Math.random() * 20) + 1;
+            enemies.push({
+                x: Math.random() * (canvas.width - 30),
+                y: 0,
+                width: 30,
+                height: 30,
+                speed: 1, // Slowed down from 2 to 1
+                number: displayNumber,
+                isCorrect: isCorrect
+            });
+            console.log(`Enemy spawned: ${displayNumber} (Correct: ${isCorrect})`);
+        }
+
+        function update() {
+            if (!gameActive) return;
+
+            console.log('Update tick');
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (rightPressed && player.x < canvas.width - player.width) player.x += 5;
+            if (leftPressed && player.x > 0) player.x -= 5;
+            drawPlayer(player.x, player.y);
+
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed;
+                drawEnemy(enemy.x, enemy.y, enemy.number);
+
+                if (enemy.x < player.x + player.width &&
+                    enemy.x + enemy.width > player.x &&
+                    enemy.y < player.y &&
+                    enemy.y + enemy.height > player.y - player.height) {
+                    enemies.splice(index, 1);
+                    lives -= 1;
+                    livesDisplay.textContent = `Lives: ${lives}`;
+                    console.log('Player hit by enemy, lives:', lives);
+                    playSound(200, 0.3, 'square');
+                    generateQuestion();
+                    if (lives <= 0) endGame();
+                    return;
+                }
+
+                if (enemy.y > canvas.height) {
+                    enemies.splice(index, 1);
+                    console.log('Enemy reached bottom, no life lost');
+                }
+            });
+
+            bullets.forEach((bullet, bIndex) => {
+                bullet.y -= bullet.speed;
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(bullet.x, bullet.y, 5, 15);
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+                        bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+                        console.log(`Bullet hit enemy: ${enemy.number}, isCorrect: ${enemy.isCorrect}, Current answer: ${currentQuestion.answer}`);
+                        if (enemy.isCorrect) {
+                            score += 1;
+                            scoreDisplay.textContent = `Score: ${score}`;
+                            console.log('Hit correct enemy! Score:', score);
+                            playSound(600, 0.1);
+                            createExplosion(enemy.x, enemy.y);
+                            generateQuestion();
+                        } else {
+                            lives -= 1;
+                            livesDisplay.textContent = `Lives: ${lives}`;
+                            console.log('Hit incorrect enemy, lives:', lives);
+                            playSound(200, 0.3, 'square');
+                            if (lives <= 0) endGame();
+                        }
+                        enemies.splice(eIndex, 1);
+                        bullets.splice(bIndex, 1);
+                    }
+                });
+                if (bullet.y < 0) bullets.splice(bIndex, 1);
+            });
+
+            drawParticles();
+            requestAnimationFrame(update);
+        }
+
+        function endGame() {
+            gameActive = false;
+            gameScreen.style.display = 'none';
+            gameOverScreen.style.display = 'block';
+            finalScoreDisplay.textContent = `${username}, your final score: ${score}`;
+        }
+
+        window.onload = function() {
+            console.log('DOM loaded');
+
+            profileScreen = document.getElementById('profileScreen');
+            gameScreen = document.getElementById('gameScreen');
+            gameOverScreen = document.getElementById('gameOverScreen');
+            usernameInput = document.getElementById('usernameInput');
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            scoreDisplay = document.getElementById('score');
+            livesDisplay = document.getElementById('lives');
+            questionDisplay = document.getElementById('question');
+            finalScoreDisplay = document.getElementById('finalScore');
+            startButton = document.getElementById('startButton');
+            restartButton = document.getElementById('restartButton');
+
+            console.log('Canvas:', canvas ? 'Found' : 'Not found');
+
+            player = { x: 400, y: 550, width: 40, height: 20 };
+            enemies = [];
+            bullets = [];
+            particles = [];
+            currentQuestion = {};
+            score = 0;
+            lives = 3;
+            username = '';
+            rightPressed = false;
+            leftPressed = false;
+            gameActive = false;
+
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', restartGame);
+
+            document.addEventListener('keydown', (e) => {
+                if (!gameActive) return;
+                console.log(`Key pressed: ${e.key}`);
+                if (e.key === 'ArrowRight') rightPressed = true;
+                if (e.key === 'ArrowLeft') leftPressed = true;
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    bullets.push({ x: player.x + player.width / 2, y: player.y, speed: 5 });
+                    console.log('Bullet fired, count:', bullets.length);
+                    playSound(400, 0.1);
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowRight') rightPressed = false;
+                if (e.key === 'ArrowLeft') leftPressed = false;
+            });
+        };
+    </script>
+</body>
+</html>
