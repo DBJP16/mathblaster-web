@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Galaxian</title>
+    <style>
+        /* CSS for styling the game */
+        canvas {
+            border: 1px solid white;
+            background: black;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #222;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        #score {
+            font-size: 24px;
+            margin: 10px;
+        }
+        #question {
+            font-size: 20px;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- HTML structure -->
+    <div id="score">Score: 0</div>
+    <div id="question"></div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <input type="number" id="answerInput" placeholder="Enter answer">
+
+    <script>
+        // Get DOM elements
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+        const questionDisplay = document.getElementById('question');
+        const answerInput = document.getElementById('answerInput');
+
+        // Game variables
+        let score = 0;
+        let player = { x: 400, y: 550, width: 40, height: 20 }; // Player ship at bottom
+        let enemies = []; // Array of enemy ships
+        let bullets = []; // Array of bullets
+        let currentQuestion = {}; // Current math question
+
+        // Player movement controls
+        let rightPressed = false;
+        let leftPressed = false;
+
+        // Generate a new math question
+        function generateQuestion() {
+            const num1 = Math.floor(Math.random() * 10) + 1;
+            const num2 = Math.floor(Math.random() * 10) + 1;
+            currentQuestion = {
+                num1: num1,
+                num2: num2,
+                answer: num1 + num2
+            };
+            questionDisplay.textContent = `What is ${num1} + ${num2}?`;
+        }
+
+        // Spawn a new enemy ship
+        function spawnEnemy() {
+            enemies.push({
+                x: Math.random() * (canvas.width - 30),
+                y: 0,
+                width: 30,
+                height: 30,
+                speed: 2
+            });
+        }
+
+        // Handle keyboard input for player movement
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight') rightPressed = true;
+            if (e.key === 'ArrowLeft') leftPressed = true;
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowRight') rightPressed = false;
+            if (e.key === 'ArrowLeft') leftPressed = false;
+        });
+
+        // Check the player's answer and spawn a bullet if correct
+        function checkAnswer() {
+            const userAnswer = parseInt(answerInput.value);
+            if (userAnswer === currentQuestion.answer) {
+                bullets.push({ x: player.x + player.width / 2, y: player.y, speed: 5 });
+                score += 10; // Points for correct answer
+                scoreDisplay.textContent = `Score: ${score}`;
+                answerInput.value = ''; // Clear input
+                generateQuestion(); // New question
+            }
+        }
+
+        // Listen for Enter key to submit answer
+        answerInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') checkAnswer();
+        });
+
+        // Main game loop
+        function update() {
+            // Clear the canvas
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Move player ship
+            if (rightPressed && player.x < canvas.width - player.width) player.x += 5;
+            if (leftPressed && player.x > 0) player.x -= 5;
+
+            // Draw player ship (triangle)
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(player.x + player.width / 2, player.y - player.height);
+            ctx.lineTo(player.x + player.width, player.y);
+            ctx.fill();
+
+            // Update and draw enemies
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed; // Move downward
+                ctx.fillStyle = 'red';
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+                ctx.fillStyle = 'white';
+                ctx.fillText(currentQuestion.answer, enemy.x + 10, enemy.y + 20);
+
+                // Remove enemy if it reaches the bottom
+                if (enemy.y > canvas.height) {
+                    enemies.splice(index, 1);
+                    score -= 5; // Penalty for missing enemy
+                    scoreDisplay.textContent = `Score: ${score}`;
+                }
+            });
+
+            // Update and draw bullets
+            bullets.forEach((bullet, bIndex) => {
+                bullet.y -= bullet.speed; // Move upward
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(bullet.x, bullet.y, 2, 10);
+
+                // Check for collisions with enemies
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+                        bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+                        enemies.splice(eIndex, 1); // Remove enemy
+                        bullets.splice(bIndex, 1); // Remove bullet
+                        score += 20; // Points for hitting enemy
+                        scoreDisplay.textContent = `Score: ${score}`;
+                    }
+                });
+            });
+
+            // Continue the game loop
+            requestAnimationFrame(update);
+        }
+
+        // Initialize and start the game
+        generateQuestion(); // First question
+        setInterval(spawnEnemy, 2000); // Spawn enemy every 2 seconds
+        update(); // Start game loop
+
+        // Focus the input field for immediate play
+        answerInput.focus();
+    </script>
+</body>
+</html>
