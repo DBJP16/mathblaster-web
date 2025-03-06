@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Math Blaster with Profiles</title>
+    <style>
+        canvas { border: 1px solid white; background: black; display: none; }
+        body { display: flex; flex-direction: column; align-items: center; background: #222; color: white; font-family: Arial, sans-serif; }
+        #score, #question, #lives, #level { font-size: 24px; margin: 10px; display: none; }
+        #profileScreen { text-align: center; }
+        #gameScreen { display: none; }
+        #gameOverScreen { display: none; text-align: center; }
+        #leaderboard { margin-top: 20px; }
+        #leaderboard h2 { margin-bottom: 10px; }
+        #leaderboardList { list-style: none; padding: 0; }
+        #leaderboardList li { margin: 5px 0; }
+        #pauseMessage { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 36px; color: yellow; }
+    </style>
+</head>
+<body>
+    <div id="profileScreen">
+        <h1>Create Your Math Blaster Profile</h1>
+        <input type="text" id="usernameInput" placeholder="Enter your username">
+        <button id="startButton">Start Game</button>
+        <div id="leaderboard">
+            <h2>Leaderboard</h2>
+            <ul id="leaderboardList"></ul>
+        </div>
+    </div>
+    <div id="gameScreen">
+        <div id="score">Score: 0</div>
+        <div id="lives">Lives: 3</div>
+        <div id="level">Level: 1</div>
+        <div id="question"></div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="pauseMessage">Paused - Press Enter to Resume</div>
+    </div>
+    <div id="gameOverScreen">
+        <h1>Game Over</h1>
+        <p id="finalScore"></p>
+        <button id="restartButton">Play Again</button>
+    </div>
+
+    <script>
+        console.log('Script starting...');
+
+        let player, enemies, bullets, particles, currentQuestion, score, lives, level, username, rightPressed, leftPressed, gameActive, isPaused;
+        let profileScreen, gameScreen, gameOverScreen, usernameInput, canvas, ctx, scoreDisplay, livesDisplay, levelDisplay, questionDisplay, finalScoreDisplay, startButton, restartButton, leaderboardList, pauseMessage;
+        let audioContext;
+        let leaderboard = JSON.parse(localStorage.getItem('mathBlasterLeaderboard')) || [];
+
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        function playSound(frequency, duration, type = 'sine') {
+            if (!audioContext) initAudio();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            oscillator.type = type;
+            oscillator.frequency.value = frequency;
+            gainNode.gain.value = 0.1;
+            oscillator.start();
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+
+        function drawPlayer(x, y) {
+            ctx.fillStyle = '#C0C0C0';
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y - 25);
+            ctx.lineTo(x + 40, y + 15);
+            ctx.lineTo(x + 30, y + 25);
+            ctx.lineTo(x + 20, y + 15);
+            ctx.lineTo(x + 10, y + 25);
+            ctx.lineTo(x, y + 15);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#00CED1';
+            ctx.beginPath();
+            ctx.moveTo(x + 20, y - 15);
+            ctx.lineTo(x + 30, y + 5);
+            ctx.lineTo(x + 10, y + 5);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#FF4500';
+            ctx.fillRect(x + 15, y + 25, 5, 5);
+            ctx.fillRect(x + 25, y + 25, 5, 5);
+        }
+
+        function drawEnemy(x, y, number) {
+            ctx.fillStyle = 'green';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 15, 15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(x + 15, y + 5, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(number, x + 10, y + 20);
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x: x + 15,
+                    y: y + 15,
+                    radius: Math.random() * 3 + 1,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 20
+                });
+            }
+        }
+
+        function drawParticles() {
+            particles.forEach((particle, index) => {
+                ctx.fillStyle = `rgba(255, 165, 0, ${particle.life / 20})`;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                ctx.fill();
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                if (particle.life <= 0) particles.splice(index, 1);
+            });
+        }
+
+        function updateLeaderboard() {
+            leaderboard.sort((a, b) => b.score - a.score);
+            leaderboard = leaderboard.slice(0, 5);
+            localStorage.setItem('mathBlasterLeaderboard', JSON.stringify(leaderboard));
+            leaderboardList.innerHTML = '';
+            leaderboard.forEach(entry => {
+                const li = document.createElement('li');
+                li.textContent = `${entry.username}: ${entry.score}`;
+                leaderboardList.appendChild(li);
+            });
+        }
+
+        function ensureCorrectAnswer() {
+            if (!gameActive || !currentQuestion.answer || isPaused) return;
+            if (!enemies.some(enemy => enemy.number === currentQuestion.answer)) {
+                spawnEnemyWithCorrectAnswer();
+                console.log('Forced spawn of correct answer enemy due to none present');
+            }
+        }
+
+        function startGame() {
+            console.log('Game starting...');
+            username = usernameInput.value.trim() || 'Player';
+            profileScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            levelDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            level = 1;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            levelDisplay.textContent = `Level: ${level}`;
+            gameActive = true;
+            isPaused = false;
+
+            generateQuestion();
+            spawnEnemyWithCorrectAnswer();
+            setInterval(spawnEnemy, 2000);
+            update();
+        }
+
+        function restartGame() {
+            console.log('Restarting game...');
+            gameOverScreen.style.display = 'none';
+            gameScreen.style.display = 'block';
+            canvas.style.display = 'block';
+            scoreDisplay.style.display = 'block';
+            livesDisplay.style.display = 'block';
+            levelDisplay.style.display = 'block';
+            questionDisplay.style.display = 'block';
+
+            score = 0;
+            lives = 3;
+            level = 1;
+            enemies = [];
+            bullets = [];
+            particles = [];
+            scoreDisplay.textContent = `Score: ${score}`;
+            livesDisplay.textContent = `Lives: ${lives}`;
+            levelDisplay.textContent = `Level: ${level}`;
+            gameActive = true;
+            isPaused = false;
+
+            generateQuestion();
+            spawnEnemyWithCorrectAnswer();
+            update();
+        }
+
+        function togglePause() {
+            if (!gameActive) return;
+            isPaused = !isPaused;
+            pauseMessage.style.display = isPaused ? 'block' : 'none';
+            console.log(`Game ${isPaused ? 'paused' : 'resumed'}`);
+            if (!isPaused) update();
+        }
+
+        function generateQuestion() {
+            const num1 = Math.floor(Math.random() * 10) + 1;
+            const num2 = Math.floor(Math.random() * 10) + 1;
+            const operation = Math.random() < 0.5 ? '+' : '-';
+            let answer;
+            if (operation === '+') {
+                answer = num1 + num2;
+            } else {
+                answer = num1 - num2;
+                if (answer < 0) {
+                    answer = num2 - num1;
+                    currentQuestion = { num1: num2, num2: num1, operation: operation, answer: answer };
+                } else {
+                    currentQuestion = { num1: num1, num2: num2, operation: operation, answer: answer };
+                }
+                console.log(`Adjusted subtraction: ${currentQuestion.num1} - ${currentQuestion.num2} = ${answer}`);
+                questionDisplay.textContent = `${username}, what is ${currentQuestion.num1} ${operation} ${currentQuestion.num2}?`;
+                enemies = enemies.filter(enemy => enemy.number !== currentQuestion.answer);
+                spawnEnemyWithCorrectAnswer();
+                return;
+            }
+            currentQuestion = { num1: num1, num2: num2, operation: operation, answer: answer };
+            questionDisplay.textContent = `${username}, what is ${num1} ${operation} ${num2}?`;
+            console.log(`New Question: ${num1} ${operation} ${num2} = ${answer}`);
+            enemies = enemies.filter(enemy => enemy.number !== currentQuestion.answer);
+            spawnEnemyWithCorrectAnswer();
+        }
+
+        function spawnEnemyWithCorrectAnswer() {
+            enemies.push({
+                x: Math.random() * (canvas.width - 30),
+                y: 0,
+                width: 30,
+                height: 30,
+                speed: 1 + (level - 1) * 0.5, // Speed increases by 0.5 per level
+                number: currentQuestion.answer,
+                isCorrect: true
+            });
+            console.log(`Spawned correct answer enemy: ${currentQuestion.answer} (Speed: ${enemies[enemies.length - 1].speed})`);
+        }
+
+        function spawnEnemy() {
+            if (!gameActive || isPaused) return;
+            ensureCorrectAnswer();
+            if (enemies.filter(enemy => enemy.number === currentQuestion.answer).length >= 1) {
+                const isCorrect = Math.random() < 0.5;
+                let displayNumber;
+                if (isCorrect) {
+                    displayNumber = currentQuestion.answer;
+                } else {
+                    do {
+                        displayNumber = Math.floor(Math.random() * 20) + 1;
+                    } while (displayNumber === currentQuestion.answer);
+                }
+                enemies.push({
+                    x: Math.random() * (canvas.width - 30),
+                    y: 0,
+                    width: 30,
+                    height: 30,
+                    speed: 1 + (level - 1) * 0.5, // Speed increases by 0.5 per level
+                    number: displayNumber,
+                    isCorrect: displayNumber === currentQuestion.answer
+                });
+                console.log(`Enemy spawned: ${displayNumber} (Correct: ${displayNumber === currentQuestion.answer}, Speed: ${enemies[enemies.length - 1].speed})`);
+            }
+        }
+
+        function update() {
+            if (!gameActive || isPaused) return;
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ensureCorrectAnswer();
+
+            if (rightPressed && player.x < canvas.width - player.width) player.x += 5;
+            if (leftPressed && player.x > 0) player.x -= 5;
+            drawPlayer(player.x, player.y);
+
+            enemies.forEach((enemy, index) => {
+                enemy.y += enemy.speed;
+                drawEnemy(enemy.x, enemy.y, enemy.number);
+
+                if (enemy.x < player.x + player.width &&
+                    enemy.x + enemy.width > player.x &&
+                    enemy.y < player.y &&
+                    enemy.y + enemy.height > player.y - player.height) {
+                    enemies.splice(index, 1);
+                    lives -= 1;
+                    livesDisplay.textContent = `Lives: ${lives}`;
+                    console.log('Player hit by enemy, lives:', lives);
+                    playSound(200, 0.3, 'square');
+                    generateQuestion();
+                    if (lives <= 0) endGame();
+                    return;
+                }
+
+                if (enemy.y > canvas.height) {
+                    enemies.splice(index, 1);
+                    console.log('Enemy reached bottom, no life lost');
+                    ensureCorrectAnswer();
+                }
+            });
+
+            bullets.forEach((bullet, bIndex) => {
+                bullet.y -= bullet.speed;
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(bullet.x, bullet.y, 5, 15);
+                enemies.forEach((enemy, eIndex) => {
+                    if (bullet.x > enemy.x && bullet.x < enemy.x + enemy.width &&
+                        bullet.y > enemy.y && bullet.y < enemy.y + enemy.height) {
+                        console.log(`Bullet hit enemy: ${enemy.number}, Current answer: ${currentQuestion.answer}`);
+                        if (enemy.number === currentQuestion.answer) {
+                            score += 1;
+                            scoreDisplay.textContent = `Score: ${score}`;
+                            console.log('Hit correct enemy! Score:', score);
+                            playSound(600, 0.1);
+                            createExplosion(enemy.x, enemy.y);
+                            generateQuestion();
+                            // Level up every 10 points, max level 5
+                            if (score % 10 === 0 && level < 5) {
+                                level += 1;
+                                levelDisplay.textContent = `Level: ${level}`;
+                                console.log(`Level up! New level: ${level}`);
+                            }
+                        } else {
+                            lives -= 1;
+                            livesDisplay.textContent = `Lives: ${lives}`;
+                            console.log('Hit incorrect enemy, lives:', lives);
+                            playSound(200, 0.3, 'square');
+                            if (lives <= 0) endGame();
+                        }
+                        enemies.splice(eIndex, 1);
+                        bullets.splice(bIndex, 1);
+                    }
+                });
+                if (bullet.y < 0) bullets.splice(bIndex, 1);
+            });
+
+            drawParticles();
+            requestAnimationFrame(update);
+        }
+
+        function endGame() {
+            gameActive = false;
+            gameScreen.style.display = 'none';
+            gameOverScreen.style.display = 'block';
+            finalScoreDisplay.textContent = `${username}, your final score: ${score} (Level ${level})`;
+            leaderboard.push({ username, score });
+            updateLeaderboard();
+        }
+
+        window.onload = function() {
+            console.log('DOM loaded');
+
+            profileScreen = document.getElementById('profileScreen');
+            gameScreen = document.getElementById('gameScreen');
+            gameOverScreen = document.getElementById('gameOverScreen');
+            usernameInput = document.getElementById('usernameInput');
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            scoreDisplay = document.getElementById('score');
+            livesDisplay = document.getElementById('lives');
+            levelDisplay = document.getElementById('level');
+            questionDisplay = document.getElementById('question');
+            finalScoreDisplay = document.getElementById('finalScore');
+            startButton = document.getElementById('startButton');
+            restartButton = document.getElementById('restartButton');
+            leaderboardList = document.getElementById('leaderboardList');
+            pauseMessage = document.getElementById('pauseMessage');
+
+            console.log('Canvas:', canvas ? 'Found' : 'Not found');
+
+            player = { x: 400, y: 550, width: 40, height: 50 };
+            enemies = [];
+            bullets = [];
+            particles = [];
+            currentQuestion = {};
+            score = 0;
+            lives = 3;
+            level = 1;
+            username = '';
+            rightPressed = false;
+            leftPressed = false;
+            gameActive = false;
+            isPaused = false;
+
+            updateLeaderboard();
+
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', restartGame);
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && gameActive) {
+                    e.preventDefault();
+                    togglePause();
+                    return;
+                }
+                if (!gameActive || isPaused) return;
+                console.log(`Key pressed: ${e.key}`);
+                if (e.key === 'ArrowRight') rightPressed = true;
+                if (e.key === 'ArrowLeft') leftPressed = true;
+                if (e.key === ' ') {
+                    e.preventDefault();
+                    bullets.push({ x: player.x + player.width / 2, y: player.y, speed: 5 });
+                    console.log('Bullet fired, count:', bullets.length);
+                    playSound(400, 0.1);
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                if (!gameActive || isPaused) return;
+                if (e.key === 'ArrowRight') rightPressed = false;
+                if (e.key === 'ArrowLeft') leftPressed = false;
+            });
+        };
+    </script>
+</body>
+</html>
